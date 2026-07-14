@@ -1,0 +1,3277 @@
+// Internal CRM + Automation + Local AI - production logical schema
+// Optimized for one company, <=11 staff, MySQL/MariaDB, and a 500 MB database ceiling.
+// Polymorphic object_type/object_id references are enforced by domain services and integrity jobs.
+
+Table users {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  email_normalized varchar(254) [unique, not null]
+  email_display varchar(254) [not null]
+  password_hash varchar(255) [not null]
+  user_kind varchar(16) [not null]
+  status varchar(24) [not null]
+  full_name varchar(160) [not null]
+  preferred_timezone varchar(64)
+  last_login_at datetime(6)
+  must_change_password boolean [not null, default: false]
+  auth_epoch int [not null, default: 1]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (status, user_kind)
+    (last_login_at)
+  }
+  Note: "Immutable staff or portal identity and account state"
+}
+
+Table staff_invitations {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  token_hash char(64) [unique, not null]
+  email_normalized varchar(254) [not null]
+  issued_by_id bigint [not null]
+  role_snapshot_json text [not null]
+  expires_at datetime(6) [not null]
+  accepted_at datetime(6)
+  revoked_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (email_normalized, expires_at)
+    (expires_at, accepted_at)
+  }
+  Note: "Single-use staff invitation"
+}
+
+Table portal_invitations {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  token_hash char(64) [unique, not null]
+  contact_id bigint [not null]
+  organization_id bigint [not null]
+  issued_by_id bigint [not null]
+  expires_at datetime(6) [not null]
+  accepted_at datetime(6)
+  revoked_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (organization_id, contact_id)
+    (expires_at, accepted_at)
+  }
+  Note: "Single-use portal invitation bound to contact and organization"
+}
+
+Table mfa_devices {
+  id bigint [pk, increment]
+  user_id bigint [not null]
+  name varchar(80) [not null]
+  secret_ciphertext text [not null]
+  key_version varchar(32) [not null]
+  confirmed_at datetime(6)
+  last_used_step bigint
+  disabled_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (user_id, disabled_at)
+  }
+  Note: "TOTP devices for staff identities"
+}
+
+Table mfa_recovery_codes {
+  id bigint [pk, increment]
+  user_id bigint [not null]
+  code_hash char(64) [unique, not null]
+  used_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (user_id, used_at)
+  }
+  Note: "Hashed single-use MFA recovery codes"
+}
+
+Table user_sessions {
+  id bigint [pk, increment]
+  session_key_hash char(64) [unique, not null]
+  user_id bigint [not null]
+  device_summary varchar(255)
+  ip_prefix varchar(64)
+  user_agent_hash char(64)
+  last_seen_at datetime(6) [not null]
+  absolute_expires_at datetime(6) [not null]
+  revoked_at datetime(6)
+  revoked_reason varchar(120)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (user_id, revoked_at)
+    (absolute_expires_at)
+  }
+  Note: "Revocable server-side session inventory"
+}
+
+Table roles {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  name varchar(120) [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  scope_ceiling varchar(24) [not null]
+  effective_from datetime(6) [not null]
+  effective_to datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+    (status, effective_from)
+  }
+  Note: "Versioned role bundle"
+}
+
+Table capabilities {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(96) [unique, not null]
+  name varchar(160) [not null]
+  risk_class varchar(24) [not null]
+  description text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Atomic authorization capability registry"
+}
+
+Table role_capabilities {
+  id bigint [pk, increment]
+  role_id bigint [not null]
+  capability_id bigint [not null]
+  condition_json text
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (role_id, capability_id) [unique]
+  }
+  Note: "Role-to-capability assignment"
+}
+
+Table user_roles {
+  id bigint [pk, increment]
+  user_id bigint [not null]
+  role_id bigint [not null]
+  granted_by_id bigint [not null]
+  valid_from datetime(6) [not null]
+  valid_to datetime(6)
+  reason varchar(255) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (user_id, valid_to)
+    (role_id, valid_to)
+  }
+  Note: "Effective-dated user role assignment"
+}
+
+Table teams {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(120) [not null]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Staff team"
+}
+
+Table team_members {
+  id bigint [pk, increment]
+  team_id bigint [not null]
+  user_id bigint [not null]
+  member_role varchar(40) [not null]
+  valid_from datetime(6) [not null]
+  valid_to datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (team_id, valid_to)
+    (user_id, valid_to)
+  }
+  Note: "Effective-dated team membership"
+}
+
+Table work_queues {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(120) [not null]
+  domain varchar(40) [not null]
+  status varchar(20) [not null]
+  assignment_policy_version_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Governed shared operational queue"
+}
+
+Table queue_memberships {
+  id bigint [pk, increment]
+  queue_id bigint [not null]
+  user_id bigint [not null]
+  can_claim boolean [not null, default: true]
+  valid_from datetime(6) [not null]
+  valid_to datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (queue_id, valid_to)
+    (user_id, valid_to)
+  }
+  Note: "Queue eligibility and claim permissions"
+}
+
+Table delegations {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  delegator_id bigint [not null]
+  delegatee_id bigint [not null]
+  scope_json text [not null]
+  starts_at datetime(6) [not null]
+  ends_at datetime(6) [not null]
+  reason varchar(255) [not null]
+  revoked_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (delegatee_id, starts_at, ends_at)
+  }
+  Note: "Time-bounded delegation of work and allowed scope"
+}
+
+Table record_grants {
+  id bigint [pk, increment]
+  grantee_user_id bigint [not null]
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  grant_type varchar(32) [not null]
+  valid_from datetime(6) [not null]
+  valid_to datetime(6)
+  granted_by_id bigint [not null]
+  reason varchar(255) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (grantee_user_id, object_type, object_id, valid_to)
+  }
+  Note: "Exceptional record-level access grant"
+}
+
+Table auth_events {
+  id bigint [pk, increment]
+  user_id bigint
+  event_type varchar(48) [not null]
+  outcome varchar(24) [not null]
+  ip_prefix varchar(64)
+  user_agent_hash char(64)
+  correlation_id char(26) [not null]
+  detail_json text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (user_id, created_at)
+    (event_type, created_at)
+    (correlation_id)
+  }
+  Note: "Authentication and account-security event stream"
+}
+
+Table login_throttles {
+  id bigint [pk, increment]
+  bucket_hash char(64) [unique, not null]
+  bucket_type varchar(24) [not null]
+  failure_count int [not null]
+  window_started_at datetime(6) [not null]
+  blocked_until datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (blocked_until)
+  }
+  Note: "Database-backed authentication throttle buckets"
+}
+
+Table configuration_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  scope varchar(64) [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  payload_json longtext [not null]
+  checksum_sha256 char(64) [not null]
+  created_by_id bigint [not null]
+  reviewed_by_id bigint
+  effective_from datetime(6)
+  retired_at datetime(6)
+  rollback_of_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (scope, version) [unique]
+    (scope, status, effective_from)
+  }
+  Note: "Immutable, checksummed configuration bundle version"
+}
+
+Table feature_flags {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(96) [unique, not null]
+  status varchar(20) [not null]
+  scope_json text [not null]
+  reason varchar(255) [not null]
+  effective_from datetime(6) [not null]
+  expires_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Server-side feature flag with audited scope"
+}
+
+Table audit_events {
+  id bigint [pk, increment]
+  event_ulid char(26) [unique, not null]
+  actor_type varchar(24) [not null]
+  actor_user_id bigint
+  effective_user_id bigint
+  action varchar(96) [not null]
+  object_type varchar(64) [not null]
+  object_id bigint
+  reason varchar(255)
+  correlation_id char(26) [not null]
+  before_hash char(64)
+  after_hash char(64)
+  diff_json longtext
+  previous_event_hash char(64)
+  event_hash char(64) [not null]
+
+  indexes {
+    (object_type, object_id, id)
+    (actor_user_id, id)
+    (correlation_id)
+    (event_hash)
+  }
+  Note: "Append-only business/security audit evidence with hash chain"
+}
+
+Table audit_manifests {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  period_start datetime(6) [not null]
+  period_end datetime(6) [not null]
+  first_event_id bigint [not null]
+  last_event_id bigint [not null]
+  event_count bigint [not null]
+  root_hash char(64) [not null]
+  verified_at datetime(6) [not null]
+  verification_result varchar(24) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Periodic audit-chain verification manifest"
+}
+
+Table privacy_cases {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  case_type varchar(32) [not null]
+  status varchar(24) [not null]
+  requester_contact_id bigint
+  organization_id bigint
+  owner_id bigint [not null]
+  deadline_at datetime(6) [not null]
+  scope_json text [not null]
+  decision_json text
+  completed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (status, deadline_at)
+    (organization_id, status)
+  }
+  Note: "Access/correction/restriction/deletion/objection/portability case"
+}
+
+Table legal_holds {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  scope_type varchar(32) [not null]
+  scope_id bigint [not null]
+  reason text [not null]
+  authority varchar(255) [not null]
+  starts_at datetime(6) [not null]
+  ends_at datetime(6)
+  review_at datetime(6) [not null]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (scope_type, scope_id, status)
+    (review_at, status)
+  }
+  Note: "Retention override for defined records/entities"
+}
+
+Table organizations {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  name varchar(200) [not null]
+  name_normalized varchar(200) [not null]
+  domain_normalized varchar(253)
+  lifecycle_state varchar(32) [not null]
+  segment_code varchar(64)
+  primary_owner_id bigint
+  next_action_at datetime(6)
+  manual_state_override varchar(32)
+  override_expires_at datetime(6)
+  data_quality_score decimal(5,2) [not null, default: 0]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (name_normalized)
+    (domain_normalized)
+    (lifecycle_state, primary_owner_id)
+    (next_action_at)
+  }
+  Note: "Canonical organization/account/prospect identity"
+}
+
+Table contacts {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  given_name varchar(100) [not null]
+  family_name varchar(100) [not null]
+  display_name varchar(220) [not null]
+  display_name_normalized varchar(220) [not null]
+  lifecycle_state varchar(32) [not null]
+  primary_owner_id bigint
+  next_action_at datetime(6)
+  data_quality_score decimal(5,2) [not null, default: 0]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (display_name_normalized)
+    (lifecycle_state, primary_owner_id)
+    (next_action_at)
+  }
+  Note: "Canonical person identity"
+}
+
+Table contact_organizations {
+  id bigint [pk, increment]
+  contact_id bigint [not null]
+  organization_id bigint [not null]
+  role_title varchar(160)
+  relationship_role varchar(64) [not null]
+  decision_influence varchar(32)
+  is_primary boolean [not null, default: false]
+  starts_at datetime(6) [not null]
+  ends_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (contact_id, ends_at)
+    (organization_id, ends_at)
+    (organization_id, is_primary, ends_at)
+  }
+  Note: "Effective-dated contact-to-organization relationship"
+}
+
+Table contact_points {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  contact_id bigint
+  organization_id bigint
+  kind varchar(24) [not null]
+  label varchar(40)
+  value_display varchar(320) [not null]
+  value_normalized varchar(320) [not null]
+  is_primary boolean [not null, default: false]
+  verification_state varchar(24) [not null]
+  verified_at datetime(6)
+  last_failure_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (kind, value_normalized)
+    (contact_id, kind, is_primary)
+    (organization_id, kind, is_primary)
+  }
+  Note: "Email, telephone, or channel address for a contact or organization"
+}
+
+Table addresses {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  contact_id bigint
+  organization_id bigint
+  address_type varchar(32) [not null]
+  line1 varchar(200)
+  line2 varchar(200)
+  locality varchar(120)
+  region varchar(120)
+  postal_code varchar(32)
+  country_code char(2)
+  freeform text
+  is_primary boolean [not null, default: false]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (organization_id, address_type, is_primary)
+    (contact_id, address_type, is_primary)
+  }
+  Note: "Typed structured or free-form service address"
+}
+
+Table consent_preferences {
+  id bigint [pk, increment]
+  contact_id bigint [not null]
+  contact_point_id bigint
+  channel varchar(24) [not null]
+  purpose_code varchar(64) [not null]
+  decision varchar(24) [not null]
+  lawful_basis varchar(64)
+  evidence_source varchar(64) [not null]
+  notice_version varchar(64)
+  effective_at datetime(6) [not null]
+  withdrawn_at datetime(6)
+  evidence_json text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (contact_id, channel, purpose_code, effective_at)
+    (contact_point_id, purpose_code, effective_at)
+  }
+  Note: "Append-only purpose/channel communication preference evidence"
+}
+
+Table suppression_entries {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  contact_id bigint
+  contact_point_id bigint
+  channel varchar(24) [not null]
+  purpose_code varchar(64)
+  scope varchar(24) [not null]
+  reason_code varchar(64) [not null]
+  precedence smallint [not null]
+  starts_at datetime(6) [not null]
+  ends_at datetime(6)
+  evidence_json text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (contact_point_id, channel, purpose_code, ends_at)
+    (contact_id, scope, ends_at)
+  }
+  Note: "Address/channel/purpose/global communication hold"
+}
+
+Table tags {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(120) [not null]
+  purpose varchar(255) [not null]
+  allowed_object_types_json text [not null]
+  status varchar(20) [not null]
+  owner_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Governed tag definition"
+}
+
+Table entity_tags {
+  id bigint [pk, increment]
+  tag_id bigint [not null]
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  assigned_by_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (object_type, object_id, tag_id) [unique]
+    (tag_id, object_type)
+  }
+  Note: "Tag assignment to a supported business entity"
+}
+
+Table custom_field_definitions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  label varchar(120) [not null]
+  data_type varchar(24) [not null]
+  object_types_json text [not null]
+  validation_json text [not null]
+  visibility_class varchar(24) [not null]
+  searchable boolean [not null, default: false]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+    (status, code)
+  }
+  Note: "Versioned typed custom-field definition"
+}
+
+Table custom_field_values {
+  id bigint [pk, increment]
+  definition_id bigint [not null]
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  value_text text
+  value_number decimal(30,8)
+  value_datetime datetime(6)
+  value_boolean boolean
+  value_json text
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (object_type, object_id, definition_id) [unique]
+    (definition_id, value_number)
+  }
+  Note: "Typed custom-field value stored against one object"
+}
+
+Table file_assets {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  storage_key varchar(255) [unique, not null]
+  original_filename varchar(255) [not null]
+  mime_type varchar(127) [not null]
+  size_bytes bigint [not null]
+  sha256 char(64) [not null]
+  classification varchar(24) [not null]
+  validation_state varchar(24) [not null]
+  retention_class varchar(64) [not null]
+  uploaded_by_id bigint
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  archived_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (object_type, object_id)
+    (sha256, size_bytes)
+    (validation_state, created_at)
+  }
+  Note: "Private filesystem object metadata"
+}
+
+Table notes {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  author_id bigint [not null]
+  category varchar(64) [not null]
+  visibility varchar(24) [not null]
+  body_text longtext [not null]
+  amends_note_id bigint
+  locked_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (object_type, object_id, created_at)
+    (author_id, created_at)
+  }
+  Note: "Structured note with explicit visibility and correction history"
+}
+
+Table timeline_events {
+  id bigint [pk, increment]
+  organization_id bigint
+  contact_id bigint
+  event_type varchar(64) [not null]
+  source_type varchar(64) [not null]
+  source_id bigint [not null]
+  actor_type varchar(24) [not null]
+  actor_id bigint
+  visibility varchar(24) [not null]
+  occurred_at datetime(6) [not null]
+  summary varchar(500) [not null]
+  correlation_id char(26) [not null]
+
+  indexes {
+    (organization_id, occurred_at)
+    (contact_id, occurred_at)
+    (source_type, source_id)
+    (correlation_id)
+  }
+  Note: "Normalized permission-aware customer timeline projection"
+}
+
+Table duplicate_candidates {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  left_type varchar(32) [not null]
+  left_id bigint [not null]
+  right_type varchar(32) [not null]
+  right_id bigint [not null]
+  score decimal(6,5) [not null]
+  reason_json text [not null]
+  status varchar(24) [not null]
+  reviewer_id bigint
+  reviewed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (left_type, left_id, status)
+    (right_type, right_id, status)
+    (status, score)
+  }
+  Note: "Explainable duplicate candidate pair awaiting human decision"
+}
+
+Table merge_records {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  object_type varchar(32) [not null]
+  survivor_id bigint [not null]
+  absorbed_id bigint [not null]
+  preview_json longtext [not null]
+  decision_json longtext [not null]
+  status varchar(24) [not null]
+  requested_by_id bigint [not null]
+  approved_by_id bigint
+  executed_at datetime(6)
+  reversed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (object_type, survivor_id)
+    (object_type, absorbed_id)
+    (status, created_at)
+  }
+  Note: "Controlled merge plan, field decisions, and reversible alias map"
+}
+
+Table business_calendars {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  timezone varchar(64) [not null]
+  weekly_hours_json text [not null]
+  holiday_dates_json text [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  effective_to datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Versioned business-time calendar"
+}
+
+Table sla_policies {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  business_calendar_id bigint [not null]
+  scope_json text [not null]
+  targets_json text [not null]
+  pause_rules_json text [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  effective_to datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+    (status, effective_from)
+  }
+  Note: "Versioned response/update/resolution targets and pause rules"
+}
+
+Table assignment_rule_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  scope varchar(64) [not null]
+  rules_json longtext [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Deterministic assignment and capacity-aware routing rules"
+}
+
+Table communication_policy_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  policy_json longtext [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Communication precedence, quiet hours, caps, and purpose rules"
+}
+
+Table leads {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint
+  contact_id bigint
+  source_code varchar(64) [not null]
+  state varchar(32) [not null]
+  owner_id bigint [not null]
+  queue_id bigint
+  priority varchar(24) [not null]
+  service_interest_code varchar(64)
+  accepted_at datetime(6) [not null]
+  first_response_due_at datetime(6)
+  first_meaningful_response_at datetime(6)
+  next_action_at datetime(6)
+  wake_up_at datetime(6)
+  conversion_score decimal(6,5)
+  disposition_code varchar(64)
+  converted_opportunity_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (state, owner_id, next_action_at)
+    (queue_id, state, accepted_at)
+    (first_response_due_at, state)
+    (contact_id, state)
+  }
+  Note: "Pre-opportunity enquiry with SLA, owner, state, and next action"
+}
+
+Table lead_source_events {
+  id bigint [pk, increment]
+  lead_id bigint [not null]
+  attribution_type varchar(24) [not null]
+  source_code varchar(64) [not null]
+  campaign_code varchar(64)
+  evidence_json text [not null]
+  occurred_at datetime(6) [not null]
+
+  indexes {
+    (lead_id, occurred_at)
+    (source_code, occurred_at)
+  }
+  Note: "Append-only first/latest/converting source evidence"
+}
+
+Table qualification_snapshots {
+  id bigint [pk, increment]
+  lead_id bigint [not null]
+  version int [not null]
+  need_summary text
+  fit_code varchar(32)
+  authority_json text
+  budget_min decimal(18,2)
+  budget_max decimal(18,2)
+  currency char(3)
+  timing_date date
+  urgency_code varchar(32)
+  constraints_json text
+  completeness decimal(5,2) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (lead_id, version) [unique]
+  }
+  Note: "Structured qualification evidence at a point in time"
+}
+
+Table pipelines {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(120) [not null]
+  service_scope_json text [not null]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Commercial process family"
+}
+
+Table pipeline_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  pipeline_id bigint [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  effective_to datetime(6)
+  checksum_sha256 char(64) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (pipeline_id, version) [unique]
+  }
+  Note: "Immutable pipeline stage configuration"
+}
+
+Table pipeline_stages {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  pipeline_version_id bigint [not null]
+  code varchar(64) [not null]
+  name varchar(120) [not null]
+  sort_order smallint [not null]
+  probability_guidance decimal(5,2)
+  sla_policy_id bigint
+  required_fields_json text [not null]
+  allowed_next_codes_json text [not null]
+  is_terminal boolean [not null, default: false]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (pipeline_version_id, code) [unique]
+    (pipeline_version_id, sort_order)
+  }
+  Note: "Stage definition inside a pipeline version"
+}
+
+Table product_services {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  name varchar(160) [not null]
+  description text
+  status varchar(20) [not null]
+  price_guidance_json text
+  onboarding_template_version_id bigint
+  effective_from datetime(6) [not null]
+  effective_to datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+    (status, effective_from)
+  }
+  Note: "Versioned governed product/service catalogue item"
+}
+
+Table exchange_rates {
+  id bigint [pk, increment]
+  base_currency char(3) [not null]
+  quote_currency char(3) [not null]
+  rate decimal(24,12) [not null]
+  source_label varchar(120) [not null]
+  effective_date date [not null]
+  entered_by_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (base_currency, quote_currency, effective_date) [unique]
+  }
+  Note: "Manually governed periodic exchange rate"
+}
+
+Table opportunities {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  primary_contact_id bigint
+  pipeline_version_id bigint [not null]
+  stage_id bigint [not null]
+  owner_id bigint [not null]
+  name varchar(200) [not null]
+  state varchar(24) [not null]
+  transaction_currency char(3) [not null]
+  value_amount decimal(18,2) [not null]
+  base_value_amount decimal(18,2) [not null]
+  exchange_rate_id bigint
+  expected_close_date date [not null]
+  forecast_category varchar(24) [not null]
+  probability_source varchar(24) [not null]
+  probability decimal(5,2)
+  next_action_at datetime(6) [not null]
+  risk_score decimal(6,5)
+  terminal_reason_code varchar(64)
+  won_at datetime(6)
+  lost_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (state, owner_id, next_action_at)
+    (pipeline_version_id, stage_id, state)
+    (expected_close_date, state)
+    (organization_id, state)
+  }
+  Note: "Commercial pursuit with stage, forecast, value, and action"
+}
+
+Table opportunity_contacts {
+  id bigint [pk, increment]
+  opportunity_id bigint [not null]
+  contact_id bigint [not null]
+  role_code varchar(64) [not null]
+  influence varchar(24)
+  sentiment varchar(24)
+  is_decision_maker boolean [not null, default: false]
+  starts_at datetime(6) [not null]
+  ends_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (opportunity_id, contact_id, role_code, ends_at)
+  }
+  Note: "Opportunity stakeholder roles and influence"
+}
+
+Table opportunity_lines {
+  id bigint [pk, increment]
+  opportunity_id bigint [not null]
+  product_service_id bigint [not null]
+  quantity decimal(18,4) [not null]
+  unit_price decimal(18,2) [not null]
+  discount_amount decimal(18,2) [not null, default: 0]
+  line_total decimal(18,2) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (opportunity_id, product_service_id)
+  }
+  Note: "Selected product/service and commercial terms"
+}
+
+Table opportunity_stage_events {
+  id bigint [pk, increment]
+  opportunity_id bigint [not null]
+  from_stage_id bigint
+  to_stage_id bigint [not null]
+  actor_id bigint
+  effective_at datetime(6) [not null]
+  reason_code varchar(64)
+  evidence_json text [not null]
+  corrects_event_id bigint
+
+  indexes {
+    (opportunity_id, effective_at)
+    (to_stage_id, effective_at)
+  }
+  Note: "Append-only opportunity stage interval history"
+}
+
+Table quotes {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  opportunity_id bigint [not null]
+  quote_number varchar(64) [unique, not null]
+  status varchar(24) [not null]
+  current_version_id bigint
+  owner_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (opportunity_id, status)
+  }
+  Note: "Quote/proposal family linked to opportunity"
+}
+
+Table quote_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  quote_id bigint [not null]
+  version int [not null]
+  state varchar(24) [not null]
+  currency char(3) [not null]
+  subtotal decimal(18,2) [not null]
+  discount_total decimal(18,2) [not null]
+  tax_total decimal(18,2) [not null]
+  grand_total decimal(18,2) [not null]
+  terms_text longtext [not null]
+  expires_at datetime(6) [not null]
+  snapshot_json longtext [not null]
+  document_file_id bigint
+  checksum_sha256 char(64)
+  issued_at datetime(6)
+  issued_by_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (quote_id, version) [unique]
+    (state, expires_at)
+  }
+  Note: "Immutable issued quote snapshot; drafts are versioned"
+}
+
+Table quote_lines {
+  id bigint [pk, increment]
+  quote_version_id bigint [not null]
+  product_code varchar(64) [not null]
+  description varchar(500) [not null]
+  quantity decimal(18,4) [not null]
+  unit_price decimal(18,2) [not null]
+  discount_amount decimal(18,2) [not null]
+  tax_amount decimal(18,2) [not null]
+  line_total decimal(18,2) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (quote_version_id, id)
+  }
+  Note: "Line items frozen to a quote version"
+}
+
+Table approval_requests {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  policy_code varchar(64) [not null]
+  requested_by_id bigint [not null]
+  reviewer_id bigint
+  state varchar(24) [not null]
+  due_at datetime(6) [not null]
+  snapshot_hash char(64) [not null]
+  snapshot_json longtext [not null]
+  invalidated_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (reviewer_id, state, due_at)
+    (object_type, object_id, state)
+  }
+  Note: "Approval request with immutable input snapshot hash"
+}
+
+Table approval_decisions {
+  id bigint [pk, increment]
+  approval_request_id bigint [not null]
+  reviewer_id bigint [not null]
+  decision varchar(24) [not null]
+  reason text [not null]
+  decided_at datetime(6) [not null]
+  snapshot_hash char(64) [not null]
+
+  indexes {
+    (approval_request_id, decided_at)
+  }
+  Note: "Immutable approve/reject/request-change decision"
+}
+
+Table tasks {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  object_type varchar(64) [not null]
+  object_id bigint [not null]
+  task_type varchar(64) [not null]
+  subject varchar(255) [not null]
+  description text
+  owner_id bigint
+  queue_id bigint
+  priority varchar(24) [not null]
+  state varchar(24) [not null]
+  due_at datetime(6)
+  original_due_at datetime(6)
+  snoozed_until datetime(6)
+  recurrence_json text
+  outcome_code varchar(64)
+  completed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (state, owner_id, due_at)
+    (queue_id, state, due_at)
+    (object_type, object_id, state)
+  }
+  Note: "Owned human obligation with due time and outcome"
+}
+
+Table task_events {
+  id bigint [pk, increment]
+  task_id bigint [not null]
+  event_type varchar(48) [not null]
+  actor_id bigint
+  occurred_at datetime(6) [not null]
+  reason varchar(255)
+  payload_json text [not null]
+
+  indexes {
+    (task_id, occurred_at)
+  }
+  Note: "Append-only task transition and due-date history"
+}
+
+Table activities {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint
+  contact_id bigint
+  object_type varchar(64)
+  object_id bigint
+  activity_type varchar(48) [not null]
+  direction varchar(16)
+  channel varchar(24) [not null]
+  started_at datetime(6) [not null]
+  duration_seconds int
+  summary text [not null]
+  outcome_code varchar(64)
+  next_action_at datetime(6)
+  author_id bigint [not null]
+  visibility varchar(24) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (organization_id, started_at)
+    (contact_id, started_at)
+    (author_id, started_at)
+  }
+  Note: "Logged call, meeting, or assisted-channel interaction"
+}
+
+Table work_queue_items {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  source_type varchar(64) [not null]
+  source_id bigint [not null]
+  queue_class varchar(32) [not null]
+  owner_id bigint
+  queue_id bigint
+  severity varchar(16) [not null]
+  state varchar(24) [not null]
+  rank_score decimal(12,4) [not null]
+  due_at datetime(6)
+  dedupe_key varchar(255) [unique, not null]
+  summary varchar(500) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, owner_id, rank_score)
+    (state, queue_id, rank_score)
+    (due_at, state)
+  }
+  Note: "Derived operational work queue projection"
+}
+
+Table notifications {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  recipient_id bigint [not null]
+  notification_type varchar(64) [not null]
+  severity varchar(16) [not null]
+  subject varchar(255) [not null]
+  body_preview varchar(500) [not null]
+  deep_link varchar(500)
+  dedupe_key varchar(255) [unique, not null]
+  state varchar(24) [not null]
+  delivered_at datetime(6)
+  acknowledged_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (recipient_id, state, created_at)
+    (severity, state, created_at)
+  }
+  Note: "Deduplicated staff notification delivery and acknowledgement"
+}
+
+Table email_accounts {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  email_address varchar(254) [unique, not null]
+  purpose varchar(64) [not null]
+  smtp_host varchar(253) [not null]
+  smtp_port smallint [not null]
+  imap_host varchar(253) [not null]
+  imap_port smallint [not null]
+  secret_reference varchar(120) [not null]
+  status varchar(24) [not null]
+  last_imap_uid bigint [not null, default: 0]
+  last_connect_at datetime(6)
+  last_send_at datetime(6)
+  consecutive_failures int [not null, default: 0]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (status, purpose)
+  }
+  Note: "Configured Truehost SMTP/IMAP mailbox and health state"
+}
+
+Table email_threads {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint
+  contact_id bigint
+  subject_normalized varchar(500) [not null]
+  participants_hash char(64) [not null]
+  match_confidence decimal(6,5) [not null]
+  owner_id bigint
+  state varchar(24) [not null]
+  last_message_at datetime(6) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (organization_id, last_message_at)
+    (contact_id, last_message_at)
+    (state, owner_id, last_message_at)
+  }
+  Note: "Canonical email conversation grouping"
+}
+
+Table email_messages {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  thread_id bigint
+  email_account_id bigint [not null]
+  direction varchar(16) [not null]
+  state varchar(24) [not null]
+  mailbox_uid bigint
+  message_id_header varchar(998)
+  in_reply_to varchar(998)
+  references_text text
+  subject varchar(998) [not null]
+  body_preview varchar(1000)
+  body_storage_key varchar(255)
+  raw_storage_key varchar(255)
+  body_sha256 char(64)
+  received_at datetime(6)
+  sent_at datetime(6)
+  provider_response varchar(500)
+  correlation_id char(26) [not null]
+  is_ambiguous_send boolean [not null, default: false]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (email_account_id, mailbox_uid) [unique]
+    (message_id_header)
+    (thread_id, received_at)
+    (thread_id, sent_at)
+    (state, created_at)
+    (correlation_id)
+  }
+  Note: "Inbound/outbound message metadata with body reference and lifecycle"
+}
+
+Table message_recipients {
+  id bigint [pk, increment]
+  email_message_id bigint [not null]
+  recipient_type varchar(8) [not null]
+  display_name varchar(160)
+  address_normalized varchar(254) [not null]
+  contact_point_id bigint
+  delivery_state varchar(24)
+  suppression_decision_json text
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (email_message_id, recipient_type)
+    (address_normalized, delivery_state)
+  }
+  Note: "To/cc/bcc/from recipient and per-address delivery state"
+}
+
+Table message_attachments {
+  id bigint [pk, increment]
+  email_message_id bigint [not null]
+  file_asset_id bigint [not null]
+  content_id varchar(255)
+  disposition varchar(24) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (email_message_id, file_asset_id) [unique]
+  }
+  Note: "Association between email message and validated file"
+}
+
+Table templates {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(160) [not null]
+  purpose_code varchar(64) [not null]
+  lifecycle_scope varchar(64) [not null]
+  owner_id bigint [not null]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Communication template family"
+}
+
+Table template_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  template_id bigint [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  subject_template varchar(998) [not null]
+  html_template longtext
+  text_template longtext [not null]
+  variable_schema_json text [not null]
+  reviewed_by_id bigint
+  effective_from datetime(6)
+  effective_to datetime(6)
+  checksum_sha256 char(64) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (template_id, version) [unique]
+    (status, effective_from)
+  }
+  Note: "Immutable reviewed template version"
+}
+
+Table message_blocks {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  block_type varchar(32) [not null]
+  status varchar(20) [not null]
+  content_text longtext [not null]
+  variable_schema_json text [not null]
+  checksum_sha256 char(64) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Approved reusable draft assembly block family"
+}
+
+Table outbox_messages {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  email_account_id bigint [not null]
+  template_version_id bigint
+  workflow_run_id bigint
+  contact_id bigint
+  purpose_code varchar(64) [not null]
+  priority_lane smallint [not null]
+  state varchar(24) [not null]
+  idempotency_key varchar(255) [unique, not null]
+  recipient_json text [not null]
+  rendered_subject varchar(998) [not null]
+  rendered_text longtext [not null]
+  rendered_html longtext
+  rendered_hash char(64) [not null]
+  attachment_ids_json text [not null]
+  scheduled_at datetime(6) [not null]
+  claimed_at datetime(6)
+  policy_decision_json longtext
+  email_message_id bigint
+  attempt_count int [not null, default: 0]
+  last_error_class varchar(64)
+  next_retry_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, priority_lane, scheduled_at)
+    (state, next_retry_at)
+    (contact_id, purpose_code, scheduled_at)
+  }
+  Note: "Durable external send intent and final policy decision"
+}
+
+Table delivery_events {
+  id bigint [pk, increment]
+  email_message_id bigint
+  outbox_message_id bigint
+  event_type varchar(48) [not null]
+  classification varchar(32) [not null]
+  occurred_at datetime(6) [not null]
+  provider_code varchar(64)
+  detail_sanitized varchar(1000)
+  correlation_id char(26) [not null]
+
+  indexes {
+    (email_message_id, occurred_at)
+    (outbox_message_id, occurred_at)
+    (event_type, occurred_at)
+  }
+  Note: "SMTP/DSN/bounce/complaint delivery evidence"
+}
+
+Table communication_ledger {
+  id bigint [pk, increment]
+  contact_id bigint [not null]
+  contact_point_id bigint [not null]
+  channel varchar(24) [not null]
+  purpose_code varchar(64) [not null]
+  direction varchar(16) [not null]
+  occurred_at datetime(6) [not null]
+  message_id bigint
+  counts_toward_cap boolean [not null, default: true]
+
+  indexes {
+    (contact_id, channel, occurred_at)
+    (contact_point_id, purpose_code, occurred_at)
+  }
+  Note: "Cross-workflow contact frequency ledger"
+}
+
+Table domain_events {
+  id bigint [pk, increment]
+  event_ulid char(26) [unique, not null]
+  event_type varchar(96) [not null]
+  schema_version smallint [not null]
+  aggregate_type varchar(64) [not null]
+  aggregate_id bigint [not null]
+  occurred_at datetime(6) [not null]
+  actor_type varchar(24) [not null]
+  actor_id bigint
+  correlation_id char(26) [not null]
+  causation_id char(26)
+  payload_json longtext [not null]
+  published_at datetime(6)
+
+  indexes {
+    (event_type, occurred_at)
+    (aggregate_type, aggregate_id, occurred_at)
+    (correlation_id)
+    (published_at, id)
+  }
+  Note: "Committed typed business event"
+}
+
+Table event_consumptions {
+  id bigint [pk, increment]
+  consumer_code varchar(96) [not null]
+  domain_event_id bigint [not null]
+  state varchar(24) [not null]
+  attempt_count int [not null, default: 0]
+  processed_at datetime(6)
+  result_json text
+  last_error varchar(1000)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (consumer_code, domain_event_id) [unique]
+    (state, updated_at)
+  }
+  Note: "Idempotent consumer ledger"
+}
+
+Table automation_definitions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(160) [not null]
+  purpose varchar(255) [not null]
+  owner_id bigint [not null]
+  status varchar(20) [not null]
+  active_version_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Workflow family identity and ownership"
+}
+
+Table automation_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  automation_definition_id bigint [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  trigger_json text [not null]
+  condition_json longtext [not null]
+  graph_json longtext [not null]
+  exit_rules_json longtext [not null]
+  reentry_policy_json text [not null]
+  communication_policy_version_id bigint
+  checksum_sha256 char(64) [not null]
+  reviewed_by_id bigint
+  effective_from datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (automation_definition_id, version) [unique]
+    (status, effective_from)
+  }
+  Note: "Immutable validated workflow configuration"
+}
+
+Table workflow_runs {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  automation_version_id bigint [not null]
+  subject_type varchar(64) [not null]
+  subject_id bigint [not null]
+  trigger_event_id bigint
+  enrollment_key varchar(255) [unique, not null]
+  state varchar(24) [not null]
+  current_step_code varchar(64)
+  correlation_id char(26) [not null]
+  depth smallint [not null, default: 0]
+  started_at datetime(6) [not null]
+  ended_at datetime(6)
+  outcome_code varchar(64)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (subject_type, subject_id, state)
+    (automation_version_id, state, started_at)
+    (correlation_id)
+  }
+  Note: "One enrolled subject and current execution state"
+}
+
+Table workflow_run_events {
+  id bigint [pk, increment]
+  workflow_run_id bigint [not null]
+  event_type varchar(48) [not null]
+  step_code varchar(64)
+  occurred_at datetime(6) [not null]
+  reason_code varchar(64)
+  detail_json longtext [not null]
+
+  indexes {
+    (workflow_run_id, occurred_at)
+  }
+  Note: "Append-only human-readable workflow run transition/action log"
+}
+
+Table scheduled_jobs {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  job_type varchar(96) [not null]
+  state varchar(24) [not null]
+  priority smallint [not null]
+  scheduled_at datetime(6) [not null]
+  next_retry_at datetime(6)
+  workflow_run_id bigint
+  step_code varchar(64)
+  payload_json longtext [not null]
+  idempotency_key varchar(255) [unique, not null]
+  lease_owner varchar(96)
+  lease_expires_at datetime(6)
+  attempt_count int [not null, default: 0]
+  max_attempts int [not null]
+  last_error_class varchar(64)
+  last_error_detail varchar(1000)
+  completed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, scheduled_at, priority)
+    (state, next_retry_at)
+    (lease_expires_at, state)
+    (workflow_run_id, state)
+  }
+  Note: "Durable, leased background job"
+}
+
+Table job_attempts {
+  id bigint [pk, increment]
+  scheduled_job_id bigint [not null]
+  attempt_number int [not null]
+  started_at datetime(6) [not null]
+  ended_at datetime(6)
+  outcome varchar(24) [not null]
+  error_class varchar(64)
+  detail_sanitized varchar(1000)
+  correlation_id char(26) [not null]
+
+  indexes {
+    (scheduled_job_id, attempt_number) [unique]
+    (outcome, started_at)
+  }
+  Note: "One execution attempt of a scheduled job"
+}
+
+Table dead_letters {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  scheduled_job_id bigint [not null]
+  severity varchar(16) [not null]
+  state varchar(24) [not null]
+  owner_id bigint
+  failure_class varchar(64) [not null]
+  failure_summary varchar(1000) [not null]
+  opened_at datetime(6) [not null]
+  acknowledged_at datetime(6)
+  resolved_at datetime(6)
+  resolution_code varchar(64)
+  replay_job_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, severity, opened_at)
+    (owner_id, state, opened_at)
+  }
+  Note: "Terminal failed job/action investigation and replay chain"
+}
+
+Table command_leases {
+  id bigint [pk, increment]
+  command_code varchar(96) [unique, not null]
+  owner_token varchar(128) [not null]
+  acquired_at datetime(6) [not null]
+  expires_at datetime(6) [not null]
+  heartbeat_at datetime(6) [not null]
+
+  indexes {
+    (expires_at)
+  }
+  Note: "Single active command lease per cron command"
+}
+
+Table command_runs {
+  id bigint [pk, increment]
+  command_code varchar(96) [not null]
+  run_ulid char(26) [unique, not null]
+  release_id bigint
+  started_at datetime(6) [not null]
+  ended_at datetime(6)
+  status varchar(24) [not null]
+  processed_count int [not null, default: 0]
+  failed_count int [not null, default: 0]
+  summary_json text [not null]
+  correlation_id char(26) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (command_code, started_at)
+    (status, started_at)
+  }
+  Note: "Durable management-command execution summary"
+}
+
+Table onboarding_templates {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(160) [not null]
+  owner_role_code varchar(64) [not null]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Onboarding template family"
+}
+
+Table onboarding_template_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  onboarding_template_id bigint [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  definition_json longtext [not null]
+  checksum_sha256 char(64) [not null]
+  effective_from datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (onboarding_template_id, version) [unique]
+  }
+  Note: "Immutable milestone blueprint and dependencies"
+}
+
+Table onboarding_cases {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  opportunity_id bigint [not null]
+  template_version_id bigint [not null]
+  owner_id bigint [not null]
+  state varchar(24) [not null]
+  phase_code varchar(64) [not null]
+  target_completion_at datetime(6) [not null]
+  next_action_at datetime(6) [not null]
+  progress_percent decimal(5,2) [not null, default: 0]
+  started_at datetime(6)
+  completed_at datetime(6)
+  outcome_code varchar(64)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (opportunity_id) [unique]
+    (state, owner_id, next_action_at)
+    (organization_id, state)
+  }
+  Note: "Instantiated delivery plan from won handoff"
+}
+
+Table onboarding_milestones {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  onboarding_case_id bigint [not null]
+  milestone_code varchar(64) [not null]
+  name varchar(200) [not null]
+  weight decimal(7,4) [not null]
+  required boolean [not null]
+  state varchar(24) [not null]
+  owner_id bigint
+  target_at datetime(6)
+  completed_at datetime(6)
+  evidence_json text
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (onboarding_case_id, milestone_code) [unique]
+    (state, target_at, owner_id)
+  }
+  Note: "Instantiated milestone state and evidence"
+}
+
+Table onboarding_dependencies {
+  id bigint [pk, increment]
+  onboarding_case_id bigint [not null]
+  predecessor_id bigint [not null]
+  successor_id bigint [not null]
+  dependency_type varchar(24) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (onboarding_case_id, predecessor_id, successor_id) [unique]
+  }
+  Note: "Instantiated acyclic milestone dependency"
+}
+
+Table customer_requests {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  contact_id bigint
+  onboarding_case_id bigint
+  ticket_id bigint
+  request_type varchar(48) [not null]
+  title varchar(255) [not null]
+  instructions text [not null]
+  state varchar(24) [not null]
+  due_at datetime(6)
+  signed_token_hash char(64)
+  token_expires_at datetime(6)
+  submitted_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (organization_id, state, due_at)
+    (signed_token_hash)
+    (onboarding_case_id, state)
+  }
+  Note: "Requested customer input/file/action via portal or signed link"
+}
+
+Table onboarding_blockers {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  onboarding_case_id bigint [not null]
+  category_code varchar(64) [not null]
+  impact varchar(24) [not null]
+  description text [not null]
+  owner_id bigint [not null]
+  state varchar(24) [not null]
+  next_action_at datetime(6) [not null]
+  escalation_due_at datetime(6)
+  resolved_at datetime(6)
+  resolution_code varchar(64)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, impact, escalation_due_at)
+    (onboarding_case_id, state)
+  }
+  Note: "Delivery blocker with owner, impact, and escalation"
+}
+
+Table ticket_categories {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(160) [not null]
+  status varchar(20) [not null]
+  required_resolution_fields_json text [not null]
+  default_queue_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Governed support category dictionary"
+}
+
+Table tickets {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  reference_number varchar(32) [unique, not null]
+  organization_id bigint [not null]
+  contact_id bigint
+  category_id bigint
+  priority varchar(16) [not null]
+  impact varchar(24)
+  urgency varchar(24)
+  state varchar(32) [not null]
+  owner_id bigint
+  queue_id bigint [not null]
+  subject varchar(500) [not null]
+  description_text longtext [not null]
+  sla_policy_id bigint [not null]
+  first_response_due_at datetime(6)
+  next_update_due_at datetime(6)
+  resolution_due_at datetime(6)
+  first_response_at datetime(6)
+  resolved_at datetime(6)
+  closed_at datetime(6)
+  next_action_at datetime(6)
+  reopen_count int [not null, default: 0]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (state, queue_id, priority, updated_at)
+    (state, owner_id, next_action_at)
+    (first_response_due_at, state)
+    (resolution_due_at, state)
+    (organization_id, updated_at)
+  }
+  Note: "Support request current state and SLA projections"
+}
+
+Table ticket_events {
+  id bigint [pk, increment]
+  ticket_id bigint [not null]
+  event_type varchar(48) [not null]
+  actor_type varchar(24) [not null]
+  actor_id bigint
+  visibility varchar(24) [not null]
+  occurred_at datetime(6) [not null]
+  summary varchar(500) [not null]
+  payload_json longtext [not null]
+  corrects_event_id bigint
+
+  indexes {
+    (ticket_id, occurred_at)
+    (event_type, occurred_at)
+  }
+  Note: "Append-only ticket history including conversation visibility"
+}
+
+Table sla_clock_intervals {
+  id bigint [pk, increment]
+  ticket_id bigint [not null]
+  clock_type varchar(24) [not null]
+  state varchar(16) [not null]
+  started_at datetime(6) [not null]
+  ended_at datetime(6)
+  reason_code varchar(64) [not null]
+  sla_policy_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (ticket_id, clock_type, started_at)
+    (ended_at, state)
+  }
+  Note: "Run/pause segments for first-response/update/resolution clocks"
+}
+
+Table ticket_links {
+  id bigint [pk, increment]
+  source_ticket_id bigint [not null]
+  target_ticket_id bigint [not null]
+  link_type varchar(24) [not null]
+  created_by_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (source_ticket_id, target_ticket_id, link_type) [unique]
+    (target_ticket_id, link_type)
+  }
+  Note: "Duplicate/parent/child/problem/related ticket linkage"
+}
+
+Table knowledge_articles {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  title varchar(255) [not null]
+  visibility varchar(24) [not null]
+  status varchar(20) [not null]
+  owner_id bigint [not null]
+  current_version_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Knowledge article family"
+}
+
+Table knowledge_article_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  knowledge_article_id bigint [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  body_text longtext [not null]
+  reviewed_by_id bigint
+  published_at datetime(6)
+  checksum_sha256 char(64) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (knowledge_article_id, version) [unique]
+  }
+  Note: "Immutable approved knowledge article version"
+}
+
+Table ticket_knowledge_usage {
+  id bigint [pk, increment]
+  ticket_id bigint [not null]
+  article_version_id bigint [not null]
+  usage_type varchar(24) [not null]
+  used_by_id bigint [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (ticket_id, article_version_id, usage_type) [unique]
+  }
+  Note: "Article usage linked to ticket resolution evidence"
+}
+
+Table survey_definitions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [unique, not null]
+  name varchar(160) [not null]
+  purpose_code varchar(64) [not null]
+  owner_id bigint [not null]
+  status varchar(20) [not null]
+  active_version_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Survey family and purpose"
+}
+
+Table survey_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  survey_definition_id bigint [not null]
+  version int [not null]
+  status varchar(20) [not null]
+  definition_json longtext [not null]
+  is_anonymous boolean [not null, default: false]
+  low_score_threshold decimal(8,2)
+  fatigue_policy_json text [not null]
+  checksum_sha256 char(64) [not null]
+  effective_from datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (survey_definition_id, version) [unique]
+  }
+  Note: "Immutable survey questions, scale, eligibility, and fatigue policy"
+}
+
+Table feedback_requests {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  survey_version_id bigint [not null]
+  organization_id bigint
+  contact_id bigint
+  source_type varchar(64) [not null]
+  source_id bigint [not null]
+  state varchar(24) [not null]
+  eligible_at datetime(6) [not null]
+  expires_at datetime(6) [not null]
+  token_hash char(64) [unique, not null]
+  eligibility_json text [not null]
+  sent_message_id bigint
+  responded_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, eligible_at)
+    (contact_id, state, created_at)
+    (source_type, source_id)
+  }
+  Note: "Survey delivery request with signed token and eligibility evidence"
+}
+
+Table feedback_responses {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  feedback_request_id bigint [not null]
+  organization_id bigint
+  contact_id bigint
+  response_state varchar(24) [not null]
+  score_numeric decimal(8,2)
+  comment_text longtext
+  classification_json text
+  submitted_at datetime(6) [not null]
+  amends_response_id bigint
+  valid_for_metrics boolean [not null, default: true]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (feedback_request_id, submitted_at)
+    (organization_id, submitted_at)
+    (score_numeric, submitted_at)
+  }
+  Note: "Exact versioned survey response"
+}
+
+Table feedback_answers {
+  id bigint [pk, increment]
+  feedback_response_id bigint [not null]
+  question_code varchar(64) [not null]
+  answer_json text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (feedback_response_id, question_code) [unique]
+  }
+  Note: "Question-level answer for survey response"
+}
+
+Table recovery_cases {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  contact_id bigint
+  source_type varchar(64) [not null]
+  source_id bigint [not null]
+  severity varchar(16) [not null]
+  state varchar(24) [not null]
+  owner_id bigint [not null]
+  due_at datetime(6) [not null]
+  communication_hold_id bigint
+  root_cause_code varchar(64)
+  outcome_code varchar(64)
+  closed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, owner_id, due_at)
+    (organization_id, state)
+    (source_type, source_id)
+  }
+  Note: "Low-feedback/complaint recovery work and communication hold"
+}
+
+Table recovery_events {
+  id bigint [pk, increment]
+  recovery_case_id bigint [not null]
+  event_type varchar(48) [not null]
+  actor_id bigint
+  occurred_at datetime(6) [not null]
+  detail_json text [not null]
+
+  indexes {
+    (recovery_case_id, occurred_at)
+  }
+  Note: "Append-only recovery interaction and outcome history"
+}
+
+Table health_rule_sets {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  segment_scope_json text [not null]
+  definition_json longtext [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  checksum_sha256 char(64) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Versioned customer health dimensions, weights, bands, and thresholds"
+}
+
+Table health_snapshots {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  rule_set_id bigint [not null]
+  score decimal(6,3) [not null]
+  band varchar(24) [not null]
+  confidence varchar(24) [not null]
+  computed_at datetime(6) [not null]
+  feature_snapshot_json longtext [not null]
+  manual_override_band varchar(24)
+  override_reason varchar(500)
+  override_expires_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (organization_id, computed_at)
+    (band, computed_at)
+  }
+  Note: "Immutable customer health snapshot with explainable reasons"
+}
+
+Table health_reasons {
+  id bigint [pk, increment]
+  health_snapshot_id bigint [not null]
+  dimension_code varchar(64) [not null]
+  reason_code varchar(96) [not null]
+  contribution decimal(8,4) [not null]
+  direction varchar(16) [not null]
+  evidence_type varchar(64) [not null]
+  evidence_id bigint
+  explanation varchar(500) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (health_snapshot_id, dimension_code)
+    (reason_code, id)
+  }
+  Note: "Dimension-level reason and source evidence for a health snapshot"
+}
+
+Table success_plans {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  owner_id bigint [not null]
+  state varchar(24) [not null]
+  plan_type varchar(48) [not null]
+  target_outcome text [not null]
+  review_at datetime(6) [not null]
+  started_at datetime(6) [not null]
+  closed_at datetime(6)
+  outcome_code varchar(64)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, owner_id, review_at)
+    (organization_id, state)
+  }
+  Note: "Customer outcome/risk recovery plan"
+}
+
+Table success_plan_actions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  success_plan_id bigint [not null]
+  subject varchar(255) [not null]
+  owner_id bigint [not null]
+  state varchar(24) [not null]
+  due_at datetime(6) [not null]
+  completed_at datetime(6)
+  evidence_json text
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (success_plan_id, state, due_at)
+    (owner_id, state, due_at)
+  }
+  Note: "Action and evidence under a success plan"
+}
+
+Table renewals {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  cycle_key varchar(96) [not null]
+  owner_id bigint [not null]
+  renewal_date date [not null]
+  notice_date date
+  currency char(3) [not null]
+  value_amount decimal(18,2) [not null]
+  state varchar(24) [not null]
+  health_snapshot_id bigint
+  decision_at datetime(6)
+  outcome_code varchar(64)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (organization_id, cycle_key) [unique]
+    (state, renewal_date, owner_id)
+  }
+  Note: "Renewal cycle, value, notice window, and decision state"
+}
+
+Table churn_events {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  effective_date date [not null]
+  currency char(3) [not null]
+  value_lost decimal(18,2) [not null]
+  reason_code varchar(64) [not null]
+  preventability varchar(24) [not null]
+  evidence_json text [not null]
+  recorded_by_id bigint [not null]
+  corrects_event_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (organization_id, effective_date)
+    (reason_code, effective_date)
+  }
+  Note: "Structured churn outcome and preventability evidence"
+}
+
+Table advocacy_suggestions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  organization_id bigint [not null]
+  contact_id bigint
+  state varchar(24) [not null]
+  owner_id bigint [not null]
+  reason_json text [not null]
+  eligible_after datetime(6) [not null]
+  expires_at datetime(6) [not null]
+  decision_code varchar(64)
+  decided_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, owner_id, eligible_after)
+    (organization_id, state)
+  }
+  Note: "Evidence-backed referral/review suggestion requiring staff approval"
+}
+
+Table model_cards {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  use_case_code varchar(64) [unique, not null]
+  name varchar(160) [not null]
+  owner_id bigint [not null]
+  purpose text [not null]
+  population_json text [not null]
+  feature_policy_json longtext [not null]
+  risk_analysis_json longtext [not null]
+  metric_contract_json text [not null]
+  max_automation_tier varchar(24) [not null]
+  review_due_at datetime(6) [not null]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  Note: "Governed use-case registration and risk/metric contract"
+}
+
+Table feature_definitions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(96) [not null]
+  version int [not null]
+  data_type varchar(24) [not null]
+  source_contract varchar(255) [not null]
+  observation_time_rule text [not null]
+  missing_value_rule text [not null]
+  sensitivity_class varchar(24) [not null]
+  proxy_risk_reviewed boolean [not null, default: false]
+  status varchar(20) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Allowlisted feature semantic and timestamp definition"
+}
+
+Table model_versions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  model_card_id bigint [not null]
+  version int [not null]
+  method varchar(64) [not null]
+  tier varchar(24) [not null]
+  status varchar(20) [not null]
+  artifact_storage_key varchar(255)
+  artifact_sha256 char(64) [not null]
+  feature_version_json text [not null]
+  thresholds_json text [not null]
+  approved_by_id bigint
+  effective_from datetime(6)
+  retired_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (model_card_id, version) [unique]
+    (status, tier, effective_from)
+  }
+  Note: "Checksummed model/rule artifact and active tier"
+}
+
+Table predictions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  model_version_id bigint [not null]
+  entity_type varchar(64) [not null]
+  entity_id bigint [not null]
+  predicted_at datetime(6) [not null]
+  valid_until datetime(6)
+  output_code varchar(96) [not null]
+  score decimal(12,8)
+  confidence decimal(12,8)
+  confidence_band varchar(24) [not null]
+  abstained boolean [not null, default: false]
+  feature_snapshot_json longtext [not null]
+  feature_hash char(64) [not null]
+  explanation_json longtext [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (entity_type, entity_id, predicted_at)
+    (model_version_id, predicted_at)
+    (output_code, predicted_at)
+  }
+  Note: "Immutable point-in-time prediction/recommendation"
+}
+
+Table prediction_reasons {
+  id bigint [pk, increment]
+  prediction_id bigint [not null]
+  sort_order smallint [not null]
+  reason_code varchar(96) [not null]
+  direction varchar(16) [not null]
+  contribution decimal(12,8)
+  evidence_type varchar(64)
+  evidence_id bigint
+  explanation varchar(500) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (prediction_id, sort_order) [unique]
+  }
+  Note: "Ordered human-readable prediction reason and evidence"
+}
+
+Table recommendation_feedback {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  prediction_id bigint [not null]
+  user_id bigint [not null]
+  decision_code varchar(64) [not null]
+  modified_action_code varchar(96)
+  rationale text
+  action_evidence_type varchar(64)
+  action_evidence_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (prediction_id, user_id)
+    (decision_code, created_at)
+  }
+  Note: "Staff response to recommendation and rationale"
+}
+
+Table outcome_labels {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  prediction_id bigint
+  entity_type varchar(64) [not null]
+  entity_id bigint [not null]
+  outcome_code varchar(96) [not null]
+  observed_at datetime(6) [not null]
+  horizon_code varchar(64) [not null]
+  evidence_type varchar(64) [not null]
+  evidence_id bigint
+  verified_by_id bigint
+  valid_for_evaluation boolean [not null, default: true]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (entity_type, entity_id, observed_at)
+    (prediction_id, observed_at)
+    (outcome_code, observed_at)
+  }
+  Note: "Verified delayed business/customer outcome"
+}
+
+Table training_runs {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  model_card_id bigint [not null]
+  state varchar(24) [not null]
+  dataset_window_json text [not null]
+  sample_counts_json text [not null]
+  parameters_json text [not null]
+  metrics_json longtext
+  baseline_metrics_json longtext
+  artifact_storage_key varchar(255)
+  artifact_sha256 char(64)
+  checkpoint_json text
+  started_at datetime(6)
+  ended_at datetime(6)
+  promotion_decision varchar(24)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (model_card_id, state, created_at)
+  }
+  Note: "Checkpointed candidate training/evaluation record"
+}
+
+Table model_monitoring_metrics {
+  id bigint [pk, increment]
+  model_version_id bigint [not null]
+  period_start datetime(6) [not null]
+  period_end datetime(6) [not null]
+  metric_code varchar(96) [not null]
+  metric_value decimal(20,8) [not null]
+  sample_count int [not null]
+  threshold_state varchar(24) [not null]
+  detail_json text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (model_version_id, metric_code, period_end)
+    (threshold_state, period_end)
+  }
+  Note: "Drift, confidence, abstention, disagreement, and delayed outcome metric"
+}
+
+Table metric_definitions {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(96) [not null]
+  version int [not null]
+  name varchar(160) [not null]
+  definition_text text [not null]
+  source_contract_json text [not null]
+  time_basis varchar(64) [not null]
+  exclusions_json text [not null]
+  owner_id bigint [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Versioned KPI definition and reconciliation contract"
+}
+
+Table metric_aggregates {
+  id bigint [pk, increment]
+  metric_definition_id bigint [not null]
+  period_start datetime(6) [not null]
+  period_end datetime(6) [not null]
+  scope_hash char(64) [not null]
+  scope_json text [not null]
+  value_decimal decimal(30,8)
+  value_json text
+  source_count bigint [not null]
+  reconciled_at datetime(6) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (metric_definition_id, period_start, period_end, scope_hash) [unique]
+  }
+  Note: "Precomputed bounded KPI aggregate"
+}
+
+Table saved_views {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  owner_id bigint [not null]
+  name varchar(160) [not null]
+  resource_type varchar(64) [not null]
+  visibility varchar(24) [not null]
+  filter_json text [not null]
+  columns_json text [not null]
+  sort_json text [not null]
+  definition_version int [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+  deleted_at datetime(6)
+  deleted_by_id bigint
+
+  indexes {
+    (owner_id, resource_type, visibility)
+  }
+  Note: "Bounded permission-aware filter and column definition"
+}
+
+Table export_jobs {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  requested_by_id bigint [not null]
+  resource_type varchar(64) [not null]
+  state varchar(24) [not null]
+  criteria_json longtext [not null]
+  field_list_json text [not null]
+  authorization_snapshot_json text [not null]
+  row_count bigint
+  file_asset_id bigint
+  file_sha256 char(64)
+  expires_at datetime(6) [not null]
+  approved_by_id bigint
+  failure_summary varchar(1000)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (requested_by_id, state, created_at)
+    (state, created_at)
+    (expires_at, state)
+  }
+  Note: "Queued permissioned export and expiring artifact"
+}
+
+Table import_mappings {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  resource_type varchar(64) [not null]
+  mapping_json longtext [not null]
+  status varchar(20) [not null]
+  checksum_sha256 char(64) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Versioned allowlisted import schema mapping"
+}
+
+Table import_batches {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  resource_type varchar(64) [not null]
+  source_file_id bigint [not null]
+  mapping_id bigint [not null]
+  state varchar(24) [not null]
+  requested_by_id bigint [not null]
+  row_count bigint [not null]
+  valid_count bigint [not null, default: 0]
+  invalid_count bigint [not null, default: 0]
+  duplicate_count bigint [not null, default: 0]
+  checkpoint_row bigint [not null, default: 0]
+  released_at datetime(6)
+  rollback_state varchar(24)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, created_at)
+    (requested_by_id, created_at)
+  }
+  Note: "Staged, validated, checkpointed import batch"
+}
+
+Table import_rows {
+  id bigint [pk, increment]
+  import_batch_id bigint [not null]
+  row_number bigint [not null]
+  source_key varchar(255) [not null]
+  raw_json longtext [not null]
+  normalized_json longtext
+  validation_json text [not null]
+  decision varchar(24)
+  target_type varchar(64)
+  target_id bigint
+  committed_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (import_batch_id, row_number) [unique]
+    (import_batch_id, source_key) [unique]
+    (target_type, target_id)
+  }
+  Note: "Row-level provenance, validation, idempotency, and commit outcome"
+}
+
+Table retention_policies {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  code varchar(64) [not null]
+  version int [not null]
+  record_class varchar(64) [not null]
+  policy_json longtext [not null]
+  status varchar(20) [not null]
+  effective_from datetime(6) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (code, version) [unique]
+  }
+  Note: "Versioned archive/purge policy by record class and state"
+}
+
+Table retention_runs {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  retention_policy_id bigint [not null]
+  mode varchar(16) [not null]
+  state varchar(24) [not null]
+  candidate_count bigint [not null]
+  processed_count bigint [not null, default: 0]
+  held_count bigint [not null, default: 0]
+  skipped_count bigint [not null, default: 0]
+  error_count bigint [not null, default: 0]
+  report_file_id bigint
+  started_at datetime(6)
+  ended_at datetime(6)
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, created_at)
+    (retention_policy_id, created_at)
+  }
+  Note: "Dry-run/execute retention evidence"
+}
+
+Table archive_manifests {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  archive_key varchar(255) [unique, not null]
+  record_class varchar(64) [not null]
+  format_version int [not null]
+  record_start_id bigint
+  record_end_id bigint
+  record_count bigint [not null]
+  file_count bigint [not null]
+  size_bytes bigint [not null]
+  sha256 char(64) [not null]
+  encryption_state varchar(24) [not null]
+  verified_at datetime(6)
+  state varchar(24) [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (record_class, state, created_at)
+    (verified_at, state)
+  }
+  Note: "Compressed archive package manifest and checksum"
+}
+
+Table archive_items {
+  id bigint [pk, increment]
+  archive_manifest_id bigint [not null]
+  record_type varchar(64) [not null]
+  record_id bigint [not null]
+  member_path varchar(500) [not null]
+  member_sha256 char(64) [not null]
+  metadata_json text [not null]
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (record_type, record_id) [unique]
+    (archive_manifest_id, id)
+  }
+  Note: "Index from archived record to package and member path"
+}
+
+Table system_incidents {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  incident_number varchar(32) [unique, not null]
+  incident_type varchar(48) [not null]
+  severity varchar(16) [not null]
+  state varchar(24) [not null]
+  title varchar(255) [not null]
+  owner_id bigint [not null]
+  detected_at datetime(6) [not null]
+  acknowledged_at datetime(6)
+  contained_at datetime(6)
+  resolved_at datetime(6)
+  root_cause text
+  customer_impact text
+  corrective_actions_json text
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, severity, detected_at)
+    (owner_id, state, detected_at)
+  }
+  Note: "Operational, security, data, mail, automation, or model incident"
+}
+
+Table incident_events {
+  id bigint [pk, increment]
+  system_incident_id bigint [not null]
+  event_type varchar(48) [not null]
+  actor_id bigint
+  occurred_at datetime(6) [not null]
+  detail_json longtext [not null]
+
+  indexes {
+    (system_incident_id, occurred_at)
+  }
+  Note: "Append-only incident timeline and decisions"
+}
+
+Table system_metrics {
+  id bigint [pk, increment]
+  metric_code varchar(96) [not null]
+  measured_at datetime(6) [not null]
+  value_decimal decimal(30,8)
+  value_text varchar(500)
+  state varchar(24) [not null]
+  detail_json text
+
+  indexes {
+    (metric_code, measured_at)
+    (state, measured_at)
+  }
+  Note: "Time-bounded internal health/capacity metric"
+}
+
+Table releases {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  release_identifier varchar(96) [unique, not null]
+  semantic_version varchar(32) [not null]
+  commit_hash char(40) [not null]
+  python_version varchar(32) [not null]
+  django_version varchar(32) [not null]
+  dependency_lock_sha256 char(64) [not null]
+  migration_set_json text [not null]
+  configuration_version_ids_json text [not null]
+  deployed_at datetime(6)
+  deployed_by_id bigint
+  state varchar(24) [not null]
+  rollback_release_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, created_at)
+  }
+  Note: "Immutable release manifest"
+}
+
+Table backup_records {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  backup_type varchar(32) [not null]
+  storage_key varchar(255) [not null]
+  release_id bigint
+  database_bytes bigint [not null]
+  private_file_count bigint [not null]
+  manifest_sha256 char(64) [not null]
+  encryption_state varchar(24) [not null]
+  created_at_source datetime(6) [not null]
+  verified_at datetime(6)
+  state varchar(24) [not null]
+  expires_at datetime(6)
+
+  indexes {
+    (state, created_at_source)
+    (expires_at, state)
+  }
+  Note: "Backup set inventory and verification state"
+}
+
+Table restore_drills {
+  id bigint [pk, increment]
+  public_id char(26) [unique, not null]
+  backup_record_id bigint [not null]
+  release_id bigint
+  state varchar(24) [not null]
+  started_at datetime(6) [not null]
+  ended_at datetime(6)
+  measured_rpo_seconds bigint
+  measured_rto_seconds bigint
+  reconciliation_json longtext
+  evidence_file_id bigint
+  performed_by_id bigint [not null]
+  approved_by_id bigint
+  created_at datetime(6) [not null]
+  updated_at datetime(6) [not null]
+  row_version int [not null, default: 1]
+
+  indexes {
+    (state, started_at)
+    (backup_record_id, started_at)
+  }
+  Note: "Timed restore drill and reconciliation evidence"
+}
+
+Ref: staff_invitations.issued_by_id > users.id
+Ref: portal_invitations.contact_id > contacts.id
+Ref: portal_invitations.organization_id > organizations.id
+Ref: mfa_devices.user_id > users.id
+Ref: mfa_recovery_codes.user_id > users.id
+Ref: user_sessions.user_id > users.id
+Ref: role_capabilities.role_id > roles.id
+Ref: role_capabilities.capability_id > capabilities.id
+Ref: user_roles.user_id > users.id
+Ref: user_roles.role_id > roles.id
+Ref: team_members.team_id > teams.id
+Ref: team_members.user_id > users.id
+Ref: queue_memberships.queue_id > work_queues.id
+Ref: queue_memberships.user_id > users.id
+Ref: delegations.delegator_id > users.id
+Ref: delegations.delegatee_id > users.id
+Ref: record_grants.grantee_user_id > users.id
+Ref: contact_organizations.contact_id > contacts.id
+Ref: contact_organizations.organization_id > organizations.id
+Ref: contact_points.contact_id > contacts.id
+Ref: contact_points.organization_id > organizations.id
+Ref: addresses.contact_id > contacts.id
+Ref: addresses.organization_id > organizations.id
+Ref: consent_preferences.contact_id > contacts.id
+Ref: consent_preferences.contact_point_id > contact_points.id
+Ref: suppression_entries.contact_id > contacts.id
+Ref: suppression_entries.contact_point_id > contact_points.id
+Ref: entity_tags.tag_id > tags.id
+Ref: custom_field_values.definition_id > custom_field_definitions.id
+Ref: notes.author_id > users.id
+Ref: leads.organization_id > organizations.id
+Ref: leads.contact_id > contacts.id
+Ref: leads.owner_id > users.id
+Ref: lead_source_events.lead_id > leads.id
+Ref: qualification_snapshots.lead_id > leads.id
+Ref: pipeline_versions.pipeline_id > pipelines.id
+Ref: pipeline_stages.pipeline_version_id > pipeline_versions.id
+Ref: opportunities.organization_id > organizations.id
+Ref: opportunities.primary_contact_id > contacts.id
+Ref: opportunities.pipeline_version_id > pipeline_versions.id
+Ref: opportunities.stage_id > pipeline_stages.id
+Ref: opportunities.owner_id > users.id
+Ref: opportunity_contacts.opportunity_id > opportunities.id
+Ref: opportunity_contacts.contact_id > contacts.id
+Ref: opportunity_lines.opportunity_id > opportunities.id
+Ref: opportunity_lines.product_service_id > product_services.id
+Ref: opportunity_stage_events.opportunity_id > opportunities.id
+Ref: quotes.opportunity_id > opportunities.id
+Ref: quote_versions.quote_id > quotes.id
+Ref: quote_lines.quote_version_id > quote_versions.id
+Ref: approval_decisions.approval_request_id > approval_requests.id
+Ref: tasks.owner_id > users.id
+Ref: tasks.queue_id > work_queues.id
+Ref: task_events.task_id > tasks.id
+Ref: activities.organization_id > organizations.id
+Ref: activities.contact_id > contacts.id
+Ref: work_queue_items.owner_id > users.id
+Ref: work_queue_items.queue_id > work_queues.id
+Ref: notifications.recipient_id > users.id
+Ref: email_threads.organization_id > organizations.id
+Ref: email_threads.contact_id > contacts.id
+Ref: email_messages.thread_id > email_threads.id
+Ref: email_messages.email_account_id > email_accounts.id
+Ref: message_recipients.email_message_id > email_messages.id
+Ref: message_attachments.email_message_id > email_messages.id
+Ref: message_attachments.file_asset_id > file_assets.id
+Ref: template_versions.template_id > templates.id
+Ref: outbox_messages.email_account_id > email_accounts.id
+Ref: outbox_messages.template_version_id > template_versions.id
+Ref: delivery_events.email_message_id > email_messages.id
+Ref: delivery_events.outbox_message_id > outbox_messages.id
+Ref: communication_ledger.contact_id > contacts.id
+Ref: communication_ledger.contact_point_id > contact_points.id
+Ref: event_consumptions.domain_event_id > domain_events.id
+Ref: automation_versions.automation_definition_id > automation_definitions.id
+Ref: workflow_runs.automation_version_id > automation_versions.id
+Ref: workflow_runs.trigger_event_id > domain_events.id
+Ref: workflow_run_events.workflow_run_id > workflow_runs.id
+Ref: scheduled_jobs.workflow_run_id > workflow_runs.id
+Ref: job_attempts.scheduled_job_id > scheduled_jobs.id
+Ref: dead_letters.scheduled_job_id > scheduled_jobs.id
+Ref: onboarding_template_versions.onboarding_template_id > onboarding_templates.id
+Ref: onboarding_cases.organization_id > organizations.id
+Ref: onboarding_cases.opportunity_id > opportunities.id
+Ref: onboarding_cases.template_version_id > onboarding_template_versions.id
+Ref: onboarding_milestones.onboarding_case_id > onboarding_cases.id
+Ref: onboarding_dependencies.onboarding_case_id > onboarding_cases.id
+Ref: onboarding_dependencies.predecessor_id > onboarding_milestones.id
+Ref: onboarding_dependencies.successor_id > onboarding_milestones.id
+Ref: customer_requests.organization_id > organizations.id
+Ref: onboarding_blockers.onboarding_case_id > onboarding_cases.id
+Ref: tickets.organization_id > organizations.id
+Ref: tickets.contact_id > contacts.id
+Ref: tickets.category_id > ticket_categories.id
+Ref: tickets.sla_policy_id > sla_policies.id
+Ref: ticket_events.ticket_id > tickets.id
+Ref: sla_clock_intervals.ticket_id > tickets.id
+Ref: ticket_links.source_ticket_id > tickets.id
+Ref: ticket_links.target_ticket_id > tickets.id
+Ref: knowledge_article_versions.knowledge_article_id > knowledge_articles.id
+Ref: ticket_knowledge_usage.ticket_id > tickets.id
+Ref: ticket_knowledge_usage.article_version_id > knowledge_article_versions.id
+Ref: survey_versions.survey_definition_id > survey_definitions.id
+Ref: feedback_requests.survey_version_id > survey_versions.id
+Ref: feedback_requests.organization_id > organizations.id
+Ref: feedback_requests.contact_id > contacts.id
+Ref: feedback_responses.feedback_request_id > feedback_requests.id
+Ref: feedback_answers.feedback_response_id > feedback_responses.id
+Ref: recovery_cases.organization_id > organizations.id
+Ref: recovery_events.recovery_case_id > recovery_cases.id
+Ref: health_snapshots.organization_id > organizations.id
+Ref: health_snapshots.rule_set_id > health_rule_sets.id
+Ref: health_reasons.health_snapshot_id > health_snapshots.id
+Ref: success_plans.organization_id > organizations.id
+Ref: success_plan_actions.success_plan_id > success_plans.id
+Ref: renewals.organization_id > organizations.id
+Ref: churn_events.organization_id > organizations.id
+Ref: advocacy_suggestions.organization_id > organizations.id
+Ref: model_versions.model_card_id > model_cards.id
+Ref: predictions.model_version_id > model_versions.id
+Ref: prediction_reasons.prediction_id > predictions.id
+Ref: recommendation_feedback.prediction_id > predictions.id
+Ref: outcome_labels.prediction_id > predictions.id
+Ref: training_runs.model_card_id > model_cards.id
+Ref: model_monitoring_metrics.model_version_id > model_versions.id
+Ref: metric_aggregates.metric_definition_id > metric_definitions.id
+Ref: export_jobs.requested_by_id > users.id
+Ref: import_batches.source_file_id > file_assets.id
+Ref: import_batches.mapping_id > import_mappings.id
+Ref: import_rows.import_batch_id > import_batches.id
+Ref: retention_runs.retention_policy_id > retention_policies.id
+Ref: archive_items.archive_manifest_id > archive_manifests.id
+Ref: incident_events.system_incident_id > system_incidents.id
+Ref: restore_drills.backup_record_id > backup_records.id
