@@ -4,7 +4,7 @@ Only the technical lead/product owner may mark formal business acceptance. Codex
 
 | Step | Title | State | Commit/release | Plan | Test evidence | Human acceptance | Notes |
 |---|---|---|---|---|---|---|---|
-| S00 | Freeze product, policy and company configuration | NOT_STARTED |  |  |  | PENDING |  |
+| S00 | Freeze product, policy and company configuration | VERIFIED |  | docs/plans/s00-freeze-product-policy-and-company-configuration.md | docs/test-evidence/s00-freeze-product-policy-and-company-configuration/review-evidence.md | APPROVED_AND_VALIDATED_BY_OGHENEMARO_2026-07-15 | Governance artifacts created; `prompt-support/validate_changed_paths.py --step S00` passed with 0 violations. Company-specific values remain owner-gated before dependent steps; no product code, route, service, migration, API operation or customer effect was introduced. |
 | S01 | Execute the actual Truehost Starter preflight | NOT_STARTED |  |  |  | PENDING |  |
 | S02 | Create repository, dependency lock and delivery controls | NOT_STARTED |  |  |  | PENDING |  |
 | S03 | Build environment configuration, observability and health foundation | NOT_STARTED |  |  |  | PENDING |  |

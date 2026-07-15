@@ -1,0 +1,51 @@
+{
+  "company": {
+    "name": "Orbit Technology",
+    "timezone": "Africa/Accra",
+    "base_currency": "USD"
+  },
+  "staff": [
+    {
+      "id": "USR-ALEX",
+      "name": "Alex Morgan",
+      "role": "Sales",
+      "team": "Commercial"
+    },
+    {
+      "id": "USR-SARA",
+      "name": "Sara Okafor",
+      "role": "Manager",
+      "team": "Customer Success"
+    },
+    {
+      "id": "USR-LIAM",
+      "name": "Liam Chen",
+      "role": "Support",
+      "team": "Delivery"
+    }
+  ],
+  "organizations": [
+    {
+      "id": "ORG-ATLAS",
+      "name": "Atlas Labs",
+      "health": "HEALTHY",
+      "owner": "USR-ALEX",
+      "value": "28500.00"
+    },
+    {
+      "id": "ORG-NORTHWIND",
+      "name": "Northwind Tech",
+      "health": "AT_RISK",
+      "owner": "USR-SARA",
+      "value": "16800.00"
+    },
+    {
+      "id": "ORG-MERIDIAN",
+      "name": "Meridian Systems",
+      "health": "ONBOARDING",
+      "owner": "USR-LIAM",
+      "value": "18400.00"
+    }
+  ],
+  "design_fixture_notice": "Synthetic data only. Never replace with production customer data in screenshots or tests."
+}

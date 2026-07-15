@@ -28,7 +28,7 @@ Before coding, read the relevant portions of these artifacts (locate by basename
 2. `docs/specs/Full_Production_CRM_Frontend_Backend_Implementation_Manual.*` and `Full_Production_Frontend_Backend_Build_Manual.md` — implementation baseline.
 3. `docs/contracts/internal_crm_openapi_v2.yaml` — HTTP contract.
 4. `docs/contracts/internal_crm_data_model.dbml` and `database_table_catalog.csv` — data contract.
-5. API, frontend, backend, build-step, workflow, UAT, acceptance, preflight, environment, and Cron matrices under `docs/`.
+5. API, frontend, backend, build-step, workflow, UAT, acceptance, preflight, environment, Cron, and frontend visual-source files under `docs/`, especially `docs/design/`.
 
 Precedence: approved PRD -> implementation manual -> OpenAPI/data contracts -> matrices/registers -> accepted ADRs -> code/migrations. On conflict, stop and ask; never invent policy.
 
@@ -136,24 +136,70 @@ Always preserve these invariants:
 9. No unbounded collection or job exists.
 10. Historical events are corrected by amendment events, not silent edits.
 
-## 9. Frontend rules
+## 9. Frontend visual source of truth and implementation rules
 
-The frontend is a responsive server-rendered web application, not a SPA.
+The frontend is a responsive server-rendered web application, not a SPA. **Never build a route blindly.** Every staff, portal, or public screen must trace to an approved route-map entry, named visual reference, design tokens, component contract, and required-state list.
 
-- Use Django templates, semantic HTML, progressive enhancement, local HTMX, and small ES modules.
-- Server state is authoritative; do not create a client global store or place auth/sensitive workflow state in `localStorage`.
-- Essential actions must work as standard HTML forms without JavaScript.
-- Keep CSS under `static_src/css/` with tokens and clear component/page classes; JavaScript under `static_src/js/`. Do not add Tailwind, Bootstrap, React, Vue, or a runtime Node build without approval.
-- All fonts, icons, images, CSS, and JavaScript are local and fingerprinted.
-- Match supplied designs accurately; otherwise use the approved design system.
+### 9.1 Mandatory design sources and precedence
 
-Every operational detail header shows identity/state, owner, next action/due time, risk/health with reasons, recent meaningful history, and allowed primary actions.
+Before UI work, read the applicable files under `docs/design/`: `screen-reference-map.csv`, `CODEX_FRONTEND_REFERENCE_RULES.md`, `COMPONENT_CATALOG.md`, `FRONTEND_VISUAL_QA.md`, `MATERIAL_ACQUISITION_GUIDE.md`, `design-tokens.json`, `design-tokens.css`, `asset-source-manifest.csv`, `selected-icon-map.csv`, `LICENSE_NOTICES.md`, `references/*.png`, `prototype/screens/*.html`, and `mock-data/crm-demo-data.json`.
 
-Forms preserve valid input, show summary and field errors, include record version, prevent mass assignment, label internal/customer/portal visibility, and explain destructive impact. Unbounded lists use cursor pagination (25 default, 100 maximum), indexed allowlisted filters/sorts, permission-filtered counts, bounded bulk selection, and asynchronous export.
+Frontend precedence is: PRD/security behavior -> route/service/API/authorization matrices -> route map -> assigned HTML/PNG -> tokens/component catalogue -> current official framework docs -> reviewed project patterns. A screenshot never overrides authorization, consent, state-machine, accessibility, or data-integrity rules.
 
-Meet WCAG 2.2 AA for applicable journeys: keyboard, focus, semantics, labels, errors, non-color meaning, contrast, 200% zoom, 360px layouts, reduced motion, and accessible dialogs/tables. Test current and previous major Chrome, Edge, Firefox, and Safari.
+### 9.2 Mandatory route gate
 
-HTMX must retain full-page fallbacks and CSRF, avoid duplicate IDs and hidden client-only state, and return correct status codes. Authenticated, portal, and signed-link content uses `Cache-Control: private, no-store`.
+Before editing any UI:
+
+1. Read this file and the current build-step prompt/path allowlist.
+2. Find the exact route in `docs/design/screen-reference-map.csv`.
+3. Open its desktop PNG and editable HTML; open the mobile reference for core responsive journeys.
+4. Read the tokens, component catalogue, visual-QA rules, required states, permission rules, and evidence requirements.
+5. Inspect installed Django/HTMX versions and current official documentation for those exact versions.
+6. Stop and request approval when the route/reference is missing, conflicts with product/security rules, or requires a new token/shared component.
+
+“Modern dashboard,” “make it beautiful,” or similar wording never authorizes an invented design system.
+
+### 9.3 Implementation, fidelity, and no-touch rules
+
+Use Django templates, semantic HTML, reusable partials, progressive enhancement, locally hosted stable HTMX 2.x, minimal vanilla JavaScript, approved CSS tokens, and local reviewed SVGs. Server state is authoritative; essential actions work as normal HTML forms without JavaScript. Do not store auth, authorization, customer, or workflow truth in browser storage.
+
+Do not add React, Vue, Angular, Svelte, Next.js, Tailwind, Bootstrap, Tabler runtime, Carbon React, a runtime Node build/CDN, another icon family, or another font without approved architecture/design change.
+
+Preserve the assigned reference’s hierarchy, grid, navigation, density, spacing, typography, radius/elevation, status meaning, icon names, labels, action order, and mobile priorities. Improve semantics/accessibility without replacing it with a generic admin template. Modify only routes, templates, partials, static files, named components, tests, and docs allowed by the current step; do not redesign unrelated navigation, tokens, authentication, portal scope, or message policy.
+
+Every operational detail header shows identity/state, owner, next action/due time, risk/health reasons, recent meaningful history, and permitted primary actions. Forms preserve valid input, show summary/field errors, include record version, prevent mass assignment, label visibility, and explain destructive impact. Unbounded lists use cursor pagination: 25 default, 100 maximum; indexed allowlisted filters/sorts; permission-filtered counts; bounded bulk selection; asynchronous export.
+
+### 9.4 Required states, accessibility, and visual evidence
+
+Implement applicable default, loading/HTMX, empty, validation, safe error, permission/404, stale-conflict, degraded dependency, queued-job, success, maintenance, narrow/zoom, and JavaScript-disabled states. Use `references/26-ui-states-board.png` as the common state reference.
+
+Before completion capture desktop `1440x1000`, narrow/tablet `1024x900`, mobile `390x844`, a 360-CSS-pixel check, 200% zoom, and keyboard-focus evidence. Store it under the build-step evidence directory and report approved variance.
+
+Meet WCAG 2.2 AA: landmarks/headings, visible labels, error summary and field errors, logical visible focus, non-color status meaning, contrast, reflow, reduced motion, accessible dialogs/tables, and keyboard alternatives. Test current and previous major Chrome, Edge, Firefox, and Safari. HTMX retains full-page fallbacks and CSRF, avoids duplicate IDs/client-only truth, and returns correct status codes. Authenticated, portal, and signed-link responses use `Cache-Control: private, no-store`.
+
+### 9.5 Assets, branding, provenance, and exact sources
+
+All assets are local and recorded in `asset-source-manifest.csv` with source, version/date, license, checksum, use, and reviewer. Use icons from `selected-icon-map.csv`; do not mix icon families, use emoji as UI icons, hotlink media, use remote avatars, or include unauthorized logos/photos.
+
+Do not invent the company logo/wordmark/favicon, legal or app name, domain, mailbox identities, colors, signature/footer, privacy/AUP text, signed-link wording, catalogue, staff identities, customer logos, or photography. Retain obvious placeholders or the neutral demo identity until approved material exists.
+
+Official acquisition locations, after exact-version/license verification:
+
+- Inter: `https://rsms.me/inter/` — vendor locally; retain OFL notice.
+- Lucide: `https://lucide.dev/icons/` — vendor reviewed SVG subset; retain ISC notice.
+- Tabler: `https://tabler.io/admin-template` — visual reference only; no runtime.
+- Carbon: `https://carbondesignsystem.com/` — table/empty-state/AI behavior reference only; no Carbon React.
+- USWDS: `https://designsystem.digital.gov/` — accessibility/form reference only.
+- unDraw: `https://undraw.co/illustrations` — optional, sparse, local, provenance-reviewed empty-state art only.
+- HTMX: `https://htmx.org/docs/` — use exact installed stable version; never copy beta/major-version examples blindly.
+
+Generated visual assets require explicit approval, prompt/reference provenance, dimensions, checksum, manifest entry, and visual review. Do not bundle font binaries or asset collections beyond the approved release assets needed by the app.
+
+### 9.6 Stop and completion conditions
+
+Stop rather than guess when a route is unmapped, branding/design is missing, a new shared component/token/font/icon family/framework is required, or the request exceeds the step allowlist.
+
+A frontend task is complete only after functional, authorization, conflict, responsive, accessibility, and visual-regression checks pass. Report routes, references, components, states, evidence captures, browser/accessibility checks, commands/results, and every known visual variance with approval status.
 
 ## 10. Backend and Python rules
 
