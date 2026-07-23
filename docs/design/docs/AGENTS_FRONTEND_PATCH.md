@@ -1,3 +1,0 @@
-## Frontend visual-reference gate
-
-For every frontend route, read `docs/design/CODEX_FRONTEND_REFERENCE_RULES.md` and look up the route in `docs/design/screen-reference-map.csv` before coding. Open the named PNG and HTML references and reuse `docs/design/design-tokens.json`. Do not invent a new visual system, introduce another font/icon family, or add a UI framework. When no approved reference exists, stop and request one rather than building blindly. Implement loading, empty, validation, permission, stale-conflict, dependency-failure and responsive states even when the default screenshot does not show them. Capture desktop and 360px evidence before marking the route complete.
